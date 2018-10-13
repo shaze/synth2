@@ -6,7 +6,10 @@
 #include <string.h>
 #include <getopt.h>
 #include <assert.h>
+typedef __u_char u_char;
 
+#include <sys/types.h>
+#include <bsd/stdlib.h>
 
 #define max_cluster 3
 
@@ -24,7 +27,8 @@ int getBim(char * bim, int *chrom_start) {
   // get the start position of each chromosome in the bim file
   // if there aren't any in that region, set to -1
   FILE *f;
-  int chrom, cm, pos, num_read; // data in bim file
+  float cm;
+  int chrom, pos, num_read; // data in bim file
   int next_chrom, line_num;
   char rs[8192], maj[32], min[32];
 
@@ -42,9 +46,9 @@ int getBim(char * bim, int *chrom_start) {
 	 next_chrom++;
      }
       line_num++;
-      num_read = fscanf(f,"%d%s%d%d%s%s\n",&chrom, rs, &cm, &pos, maj, min);
+      num_read = fscanf(f,"%d%s%f%d%s%s\n",&chrom, rs, &cm, &pos, maj, min);
   }
-  while (next_chrom<27) {
+    while (next_chrom<27) {
       chrom_start[next_chrom]=-1;
       next_chrom ++;
   }
@@ -91,10 +95,13 @@ int getFam(char * fam) {
   return num;
 }  
 
+static char *dummy;
+
 int * getClusters(char * cluster_fname, int *num) {
   FILE *f;
   int *cluster, d, nrd,j,m;
-  char dummy[4096],c;
+  char c;
+  dummy = malloc(8192);
   *num=0;
   f = fopen(cluster_fname,"r");
   while (fscanf(f,"%[^\n]\n",dummy)  != -1) (*num)++;
@@ -104,7 +111,7 @@ int * getClusters(char * cluster_fname, int *num) {
   for (int i=0; i<*num; i++) {
      j=0;
       do {
-	 m=fscanf(f,"%d%[\n]",&d,&c);
+	 m=fscanf(f,"%d%[\n]",&d,dummy);
 	 cluster[i*max_cluster+j]=d;
 	 j++;
       } while (m<2);
@@ -145,8 +152,8 @@ void generateNewVariant(unsigned char * new_bed,int *clusters, int v, int *rnds,
 
    updateChoices(choice, v, clusters, rnds, gen);
    // index into the BED file for this variant's block
-   old = 3+ old_bed + v*bsize; // (3 is for magic numbers)
-   trg = 3+ new_bed+ v*new_bsize;
+   old = old_bed + (long) v*bsize; 
+   trg = 3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
    for(int i=0; i<num_new; i++) {
         // we're producing a smaller set, so the new "person" is at a different
       // position, both byte and then postion within the byte
@@ -159,7 +166,7 @@ void generateNewVariant(unsigned char * new_bed,int *clusters, int v, int *rnds,
       data     = old[src_idx] & mask[src_pr];
       // put in right place -- probably need to shift it to left or right
       // need to shift by multiples of two
-      shift = (src_pr-trg_pr)<<1; // *2 
+      shift = (trg_pr-src_pr)<<1; // *2 
       if (shift>0)
 	 trg[trg_idx] |= (data << shift);
       else
@@ -189,7 +196,7 @@ int * generateSamples(unsigned char * new_bed, int * clusters) {
    bzero(choice, num_new*sizeof(int));
 
    gen = num_new < num_clusters ? num_new : num_clusters;
-   rnds  = shuffled(num_s);
+   rnds  = shuffled(num_clusters);
    for (v=0; v<num_v; v++) 
       generateNewVariant(new_bed, clusters, v, rnds, gen, choice);
    return rnds;
@@ -251,7 +258,7 @@ int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
       is_case[rnd[i]]=1;
    }
    f = fopen(mute_file, "r");
-   while (fscanf(f,"%d %f %f\n", &v, &case_p, &cntl_p) != -1) {
+   while (fscanf(f,"%d %f %f\n", &v, &case_p, &cntl_p) == 3) {
       data =  0;
       p_pr = 0;
       for(int p=0; p<num_new; p++) {
@@ -262,7 +269,7 @@ int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
 	 data =  data  | (get_prob(prob_cut) << (2*p_pr));
 	 p_pr++;
          if (p_pr == 4) {
-	    int bptr = 3+v*new_bsize+p_index;
+	    long bptr = (long) 3+((long) v)*((long) new_bsize)+p_index;
   	    new_bed[bptr] = data;
 	    p_pr=0;
 	    data = 0;

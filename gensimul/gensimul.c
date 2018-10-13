@@ -15,13 +15,25 @@ typedef __u_char u_char;
 
 
 
-static int  num_s, num_v, num_new, num_clusters, bsize, new_bsize;
-static unsigned char * old_bed;
+typedef struct {
+  int  num_v; // num variants in file
+  int  num_s; // num sample;
+  unsigned char magic[3];
+  unsigned char **bed;
+} bed_file;
+  
+
+static bed_file old_bed, new_bed;
+static int      num_clusters;
 
 static int mask[4] = {3,12,48,192};
 
 static int chrom_start[27];
 
+
+def getBlockSize(bed_file *b) {
+  return (num_s+3)>>4;
+}
 
 int getBim(char * bim, int *chrom_start) {
   // get the start position of each chromosome in the bim file

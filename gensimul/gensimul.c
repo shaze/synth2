@@ -1,4 +1,7 @@
-
+/* Scott Hazelhurst, 2018 (C) University of the Witwatersrand             
+ * Released under the MIT Licence
+ */
+ 
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,47 +9,59 @@
 #include <string.h>
 #include <getopt.h>
 #include <assert.h>
-typedef __u_char u_char;
+#include <errno.h>
 
+#ifdef linux
+typedef __u_char u_char;
 #include <sys/types.h>
 #include <bsd/stdlib.h>
+#endif
+
 
 #define max_cluster 3
 
-
+typedef unsigned long u_long;
 
 typedef struct {
   int  num_v; // num variants in file
   int  num_s; // num sample;
   unsigned char magic[3];
-  unsigned char **bed;
+  unsigned char *bed;
 } bed_file;
   
 
 static bed_file old_bed, new_bed;
-static int      num_clusters;
+static int      num_clusters, num_new;
 
 static int mask[4] = {3,12,48,192};
 
-static int chrom_start[27];
+static long chrom_start[27];
 
 
-def getBlockSize(bed_file *b) {
-  return (num_s+3)>>4;
+
+u_long getBlockSize(bed_file *b) {
+  // each block in the the BED file has call for one variant
+  // -- need two bits per person -- rounded up
+  u_long bsize = (b->num_s+3)>>2;
+  return bsize;
 }
 
-int getBim(char * bim, int *chrom_start) {
+int getBim(char * bim, long *chrom_start) {
   // get the start position of each chromosome in the bim file
   // if there aren't any in that region, set to -1
   FILE *f;
   float cm;
-  int chrom, pos, num_read; // data in bim file
+  int chrom;
+  long pos, num_read; // data in bim file
   int next_chrom, line_num;
   char rs[8192], maj[32], min[32];
-
   
   f = fopen(bim,"r");
-  num_read = fscanf(f,"%d%s%d%d%s%s\n",&chrom, rs, &cm, &pos, maj, min);
+  if (f==NULL) {
+    perror(bim);
+    exit(errno);
+  }
+  num_read = fscanf(f,"%d%s%f%ld%s%s\n",&chrom, rs, &cm, &pos, maj, min);
   next_chrom = line_num = 0;
   while (num_read == 6) {
       while(next_chrom<chrom) { // missing chroms in bim file
@@ -58,43 +73,41 @@ int getBim(char * bim, int *chrom_start) {
 	 next_chrom++;
      }
       line_num++;
-      num_read = fscanf(f,"%d%s%f%d%s%s\n",&chrom, rs, &cm, &pos, maj, min);
+      num_read = fscanf(f,"%d%s%f%ld%s%s\n",&chrom, rs, &cm, &pos, maj, min);
   }
     while (next_chrom<27) {
       chrom_start[next_chrom]=-1;
       next_chrom ++;
   }
-  /*
-  for(next_chrom = 0; next_chrom<27; next_chrom++) {
-    printf("chrom[%d] = %d\n",next_chrom, chrom_start[next_chrom]);
-    }*/
   fclose(f);
   return line_num;
 }
 
 
 
-unsigned char * readBed(char *bed) {
+void readBed(char * bed_fname, bed_file *bed) {
     FILE *bf;
-    int num_read;
-    unsigned char magic[3], *bdata;
+    int num_read, bsize;
 
-    bf = fopen(bed, "r");
-    num_read =  fread(magic, 1, 3, bf);
-    assert ( (magic[0]==108) && (magic[1]==27) && (magic[2]==1));
-    bdata = calloc(num_v,bsize);
-    num_read = fread(bdata, bsize, num_v, bf);
-    return bdata;
+    bsize = getBlockSize(bed);
+    bf = fopen(bed_fname, "r");
+    if (bf==NULL) {
+      perror(bed_fname);
+      exit(errno);
+    }
+    num_read =  fread(bed->magic, 1, 3, bf);
+    assert ( (bed->magic[0]==108) && (bed->magic[1]==27) && (bed->magic[2]==1));
+    bed->bed = calloc(bed->num_v,bsize);
+    num_read = fread(bed->bed,  bsize, bed->num_v, bf);
 }
 
-unsigned char * allocBed(int num_new) {
-    unsigned char  *bdata;
-    bdata = malloc(3+num_v*new_bsize);
-    bzero(bdata,3+num_v*new_bsize);
-    bdata[0]=108;
-    bdata[1]=27;
-    bdata[2]=1;
-    return bdata;
+void allocBed(bed_file * bed) {
+  u_long bsize = getBlockSize(bed);
+  bed->bed     = malloc(bed->num_v*bsize);
+  bzero(bed->bed,bed->num_v*bsize);
+  bed->magic[0]= 108;
+  bed->magic[1]= 27;
+  bed->magic[2]=1;
 }
 
 int getFam(char * fam) {
@@ -102,6 +115,10 @@ int getFam(char * fam) {
   char dummy[4096];
   int num=0, res;
   f = fopen(fam,"r");
+  if (f==NULL) {
+    perror(fam);
+    exit(errno);
+  }
   while (fscanf(f,"%[^\n]\n",dummy)  != -1) num++;
   fclose(f);
   return num;
@@ -116,10 +133,14 @@ int * getClusters(char * cluster_fname, int *num) {
   dummy = malloc(8192);
   *num=0;
   f = fopen(cluster_fname,"r");
+  if (f==NULL) {
+    perror(cluster_fname);
+    exit(errno);
+  }
   while (fscanf(f,"%[^\n]\n",dummy)  != -1) (*num)++;
   fclose(f);
   cluster = (int *) malloc(sizeof(int)*(*num)*max_cluster);
-  f = fopen(cluster_fname,"r");  
+  f = fopen(cluster_fname,"r");
   for (int i=0; i<*num; i++) {
      j=0;
       do {
@@ -135,7 +156,7 @@ int * getClusters(char * cluster_fname, int *num) {
   return cluster;
 }
 
-void updateChoices(int * choice, int v, int * clusters, int *rnds, int gen) {
+void updateChoices(int * choice, u_long v, int * clusters, int *rnds, int gen) {
    // Update which individual will chosen as source for the new person
    // based upon genome position. At the moment, this is done at
    // the start of a new chromosome -- to keep consistency we don't change
@@ -156,16 +177,16 @@ void updateChoices(int * choice, int v, int * clusters, int *rnds, int gen) {
 	     
   
 
-void generateNewVariant(unsigned char * new_bed,int *clusters, int v, int *rnds, int gen,
-			             int * choice) {
+void generateNewVariant(int *clusters, u_long v,
+			            int *rnds, int gen,  int * choice) {
    int    src_idx, src_pr, trg_idx, trg_pr, src;
    int   shift;
    unsigned char *old, *trg, data;
 
    updateChoices(choice, v, clusters, rnds, gen);
    // index into the BED file for this variant's block
-   old = old_bed + (long) v*bsize; 
-   trg = 3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
+   old = old_bed.bed + v*getBlockSize(&old_bed); 
+   trg = new_bed.bed+ v*getBlockSize(&new_bed); 
    for(int i=0; i<num_new; i++) {
         // we're producing a smaller set, so the new "person" is at a different
       // position, both byte and then postion within the byte
@@ -178,11 +199,8 @@ void generateNewVariant(unsigned char * new_bed,int *clusters, int v, int *rnds,
       data     = old[src_idx] & mask[src_pr];
       // put in right place -- probably need to shift it to left or right
       // need to shift by multiples of two
-      shift = (trg_pr-src_pr)<<1; // *2 
-      if (shift>0)
-	 trg[trg_idx] |= (data << shift);
-      else
-	 trg[trg_idx] |= (data >> -shift);
+      shift = (trg_pr-src_pr)<<1;// *2
+      trg[trg_idx] |= shift > 0 ? data << shift : data >> -shift ;
    }
 }
 
@@ -201,20 +219,21 @@ int * shuffled(int gen) {
    return rnds;
 }
 
-int * generateSamples(unsigned char * new_bed, int * clusters) {
-   int gen, *rnds, i, next,swap, v;
+int * generateSamples(int * clusters) {
+   int gen, *rnds, i, next;
    int choice[num_new]; // for each person who the current source is 
 
    bzero(choice, num_new*sizeof(int));
 
    gen = num_new < num_clusters ? num_new : num_clusters;
    rnds  = shuffled(num_clusters);
-   for (v=0; v<num_v; v++) 
-      generateNewVariant(new_bed, clusters, v, rnds, gen, choice);
+   for (u_long v=0; v<new_bed.num_v; v++)  {
+      generateNewVariant(clusters, v, rnds, gen, choice);
+   }
    return rnds;
 }
 
-void outputData(char * base, unsigned char * new_bed, int * is_case) {
+void outputData(char * base, bed_file * new_bed, int * is_case) {
   FILE *g;
   char outfname[4096];
   int   phe;
@@ -222,11 +241,21 @@ void outputData(char * base, unsigned char * new_bed, int * is_case) {
   strcpy(outfname,base);
   strcat(outfname,".bed");
   g = fopen(outfname,"w");
-  fwrite(new_bed,1,3+new_bsize*num_v,g);
+  if (g == NULL) {
+    perror(outfname);
+    exit(errno);
+  }
+  fwrite(new_bed->magic,1,3,g);
+  fwrite(new_bed->bed,getBlockSize(new_bed),new_bed->num_v,g);
   fclose(g);
   strcpy(outfname,base);
   strcat(outfname,".fam");
   g = fopen(outfname,"w");
+  if (g==NULL) {
+    perror(outfname);
+    exit(errno);
+  }
+  printf("Opened fam <%s> to %d\n",outfname,num_new);
   for(int i=0; i<num_new; i++) {
      phe = 1+is_case[i];
      fprintf(g,"D%04d\tD%04d\t0\t0\t0\t%d\n",i,i,phe);
@@ -238,10 +267,10 @@ void outputData(char * base, unsigned char * new_bed, int * is_case) {
 unsigned char get_prob(float prob_cut) {
    float coin;
    unsigned int   num=0, res;
-   coin =  (float) arc4random_uniform(100000)/100000;
-   if (coin < prob_cut) num++;
-   coin =  (float) arc4random_uniform(100000)/100000;
-   if (coin < prob_cut) num++;
+   coin =  (float) arc4random_uniform(100001)/100000;
+   if (coin <= prob_cut) num++;
+   coin =  (float) arc4random_uniform(100001)/100000;
+   if (coin <= prob_cut) num++;
     switch (num) {
       case 0: res=3;
 	 break;
@@ -252,12 +281,13 @@ unsigned char get_prob(float prob_cut) {
    return res;
 }
 
-int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
+int * mutateData(char * mute_file, bed_file * new_bed, int num_new) {
    /* mute_file contains a list of mutations -- each line a triple
     * index in bim file, prob of mutation in case, prob of mutation in control */
    FILE *f;
-   int * rnd, v, *is_case;
-   int    p_index; // which byte in the block
+   int * rnd,  *is_case;
+   u_long v;
+   u_long  p_index; // which byte in the block
    int    p_pr=0;     // which two bit of  the byte
    float  case_p, cntl_p, prob, prob_cut;
    unsigned char  data;
@@ -270,7 +300,11 @@ int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
       is_case[rnd[i]]=1;
    }
    f = fopen(mute_file, "r");
-   while (fscanf(f,"%d %f %f\n", &v, &case_p, &cntl_p) == 3) {
+   if (f==NULL) {
+     perror(mute_file);
+     exit(errno);
+   }
+   while (fscanf(f,"%ld %f %f\n", &v, &case_p, &cntl_p) == 3) {
       data =  0;
       p_pr = 0;
       for(int p=0; p<num_new; p++) {
@@ -281,8 +315,8 @@ int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
 	 data =  data  | (get_prob(prob_cut) << (2*p_pr));
 	 p_pr++;
          if (p_pr == 4) {
-	    long bptr = (long) 3+((long) v)*((long) new_bsize)+p_index;
-  	    new_bed[bptr] = data;
+	    u_long bptr = v*getBlockSize(new_bed)+p_index;
+  	    new_bed->bed[bptr] = data;
 	    p_pr=0;
 	    data = 0;
 	 }
@@ -295,28 +329,27 @@ int * mutateData(char * mute_file, unsigned char * new_bed, int num_new) {
 int main(int argc, char *argv[]) {
 
    int  *clusters, *is_case;
-  unsigned char * new_bed;
-  char  bed[4096], bim[4096], fam[4096];
-  strcpy(bed, argv[1]);
-  strcpy(bim, argv[1]);
-  strcpy(fam, argv[1]);  
-  strcat(bed, ".bed");
-  strcat(bim, ".bim");
-  strcat(fam, ".fam");  
-
-  num_new         = atoi(argv[2]);
-  new_bsize        = (num_new+3)/4;
-  num_s             = getFam(fam);
-  bsize               = (num_s+3)/4;
-  num_v            = getBim(bim, chrom_start);
-  old_bed           = readBed(bed);
-  new_bed         = allocBed(num_new);
+  char  bed_fn[4096], bim_fn[4096], fam_fn[4096];
+  strcpy(bed_fn, argv[1]);
+  strcpy(bim_fn, argv[1]);
+  strcpy(fam_fn, argv[1]);  
+  strcat(bed_fn, ".bed");
+  strcat(bim_fn, ".bim");
+  strcat(fam_fn, ".fam");  
+  num_new = atoi(argv[2]);
+ 
+  old_bed.num_s  = getFam(fam_fn);
+  old_bed.num_v  = getBim(bim_fn, chrom_start);
+  new_bed.num_s=  num_new;
+  new_bed.num_v = old_bed.num_v;
+  readBed(bed_fn, &old_bed);
+  allocBed(&new_bed);
   clusters           = getClusters(argv[3],&num_clusters);
 
-  generateSamples(new_bed, clusters);
+  generateSamples(clusters);
 
-  is_case = mutateData(argv[4],new_bed, num_new);
+  is_case = mutateData(argv[4], &new_bed, num_new);
   
-  outputData(argv[5], new_bed, is_case);
+  outputData(argv[5], &new_bed, is_case);
  
 }

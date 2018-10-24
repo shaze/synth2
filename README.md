@@ -2,7 +2,7 @@
 Workflow for creating artificial GWAS data sets based on real data
 
 
-#gensimul#
+# gensimul#
 
 This is C program that takes a source plink file, anonymises
   and does some randomisation. Here is an example.
@@ -55,3 +55,16 @@ Then call our auxiliary script to produce in the right format
 ```
 python3 munge_cluster.py data data.clt
 ```
+
+## Other scripts ##
+
+* `refam.py`: Python program that takes a FAM file, anonymises, removes sex and phenotype data
+
+   The options are:
+   * `--desex`  Puts 0 in each entry in the sex column (else leaves alone)
+   * `--depheno` Puts a 0 in each entry in the pheno colum (else leaves alone)
+   * `--batch`  If used creates a pheno file with fake batches. Give as arguments comma separated lists of ranges (1-indexed). The individuals in each range are given a distinct batch number. e.g. `--batch 30-50,9000-10000` would put all individuals from line 30 in the fam file to and including line 49 in batch 1, and individuals from 9000 up to and including 9999 in batch 2. All others would be in batch 0.
+```python3 /projects/scott/shaze/synth2/scripts/refam.py --batch 4149-6548 ```
+
+   * `--miss-batch x.imiss num_under num_above cut`  This is used to batch according to missingness. Using missingness specified by the imiss file, choose num_under below the cut-off given and num_above above the cut-off given. 
+

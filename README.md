@@ -2,7 +2,7 @@
 Workflow for creating artificial GWAS data sets based on real data
 
 
-# gensimul#
+# gensimul 
 
 This is C program that takes a source plink file, anonymises
   and does some randomisation. Here is an example.
@@ -68,3 +68,20 @@ python3 munge_cluster.py data data.clt
 
    * `--miss-batch x.imiss num_under num_above cut`  This is used to batch according to missingness. Using missingness specified by the imiss file, choose num_under below the cut-off given and num_above above the cut-off given. 
 
+# Sample run
+
+```
+PDIR=...
+DATA=..
+MUTES=..
+RESDIR=
+$PDIR/gensimul/gensimul $DATA   2018 ${DATA}.clt $MUTES /tmp/step0
+cp ${DATA}.bim /tmp/step0.bim
+cd /tmp
+plink --bfile step0 --impute-sex --make-bed --out step1
+plink --bfile step0  --missing --out step1
+python3 ${PDIR}/scripts/refam.py  --miss-batch step1.imiss 640 60 0.014 KT step1.fam  step2.fam
+cp step1.{bed,bim} $RESDIR/
+cp step2.fam $RESDIR/step1.fam
+cp step2.phe $RESDIR/step1.phe
+```

@@ -280,6 +280,7 @@ void outputData(char * base, bed_file * new_bed, int * is_case) {
   char outfname[4096];
   int   phe;
 
+
   strcpy(outfname,base);
   strcat(outfname,".bed");
   g = fopen(outfname,"w");
@@ -306,7 +307,7 @@ void outputData(char * base, bed_file * new_bed, int * is_case) {
 
 
 unsigned char get_prob(float prob_cut) {
-   float coin;
+   float coin=0.1;
    unsigned int   num=0, res;
    coin =  (float) arc4random_uniform(100001)/100000;
    if (coin <= prob_cut) num++;
@@ -327,13 +328,15 @@ int * mutateData(char * mute_file, bed_file * new_bed) {
    /* mute_file contains a list of mutations -- each line a triple
     * index in bim file, prob of mutation in case, prob of mutation in control */
    FILE *f;
-   int * rnd,  *is_case;
+   int * rnd,  *is_case, new_val;
    u_long v;
    u_long  p_index; // which byte in the block
    int    p_pr=0;     // which two bit of  the byte
    float  case_p, cntl_p, prob, prob_cut;
    unsigned char  data;
-
+   int cases[4], controls[4];
+   bzero(controls,4*sizeof(int));
+   bzero(cases,4*sizeof(int));
    is_case = malloc(new_bed->num_s*sizeof(int));
    bzero(is_case, new_bed->num_s*sizeof(int));
    rnd = shuffled(new_bed->num_s);
@@ -346,7 +349,8 @@ int * mutateData(char * mute_file, bed_file * new_bed) {
      perror(mute_file);
      exit(errno);
    }
-   while (fscanf(f,"%ld %f %f\n", &v, &case_p, &cntl_p) == 3) {
+   char x[100];
+   while (fscanf(f,"%ld %f %f %[^\n]%*c", &v, &case_p, &cntl_p,x) >= 3) {
       data =  0;
       p_pr = 0;
       for(int p=0; p<new_bed->num_s; p++) {
@@ -354,7 +358,11 @@ int * mutateData(char * mute_file, bed_file * new_bed) {
 	 p_index = p>>2;
 	 // Add to data -- the lowest two-bits in the byte contain the
 	 // lowest numbered individual
-	 data =  data  | (get_prob(prob_cut) << (2*p_pr));
+	 new_val = get_prob(prob_cut);
+	 data =  data  | (new_val << (2*p_pr));
+	 //printf("Ind %d; cc %d; prob %f; nv %d\n",p,is_case[p],prob_cut,new_val);
+	 if (is_case[p]) cases[new_val]++;
+	 else controls[new_val]++;
 	 p_pr++;
          if (p_pr == 4) {
 	    u_long bptr = v*getBlockSize(new_bed)+p_index;
@@ -364,6 +372,8 @@ int * mutateData(char * mute_file, bed_file * new_bed) {
 	 }
       }
    }
+   //printf("Cases %d %d %d %d\n",cases[0],cases[1],cases[2],cases[3]);
+   //printf("Controls %d %d %d %d\n",controls[0],controls[1],controls[2],controls[3]);
    return is_case;
 }
 

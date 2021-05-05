@@ -31,7 +31,8 @@ void hash_add(char * snp, int p) {
     ind=(ind+i)&mask;
     i=i+2;
   }
-  if (ind==0) ind=1;
+  if (strcmp("snp-known61733550",snp)==0)
+    printf("Hash index %d\n",ind);
   table[ind]=p;
 }
 
@@ -47,7 +48,7 @@ int  hash_find(char ** bim_table, char * snp) {
     printf("No entry <%s> %d in hash table\n", snp, orig);
     exit(-17);
   }
-  return ind;
+  return table[ind];
 }
   
 

@@ -6,6 +6,12 @@
 #include <string.h>
 #include <getopt.h>
 #include <assert.h>
+
+# ifndef __u_char_defined
+typedef __u_char u_char;
+#define __u_char_defined
+# endif
+#include <bsd/stdlib.h>
 typedef  unsigned char u_char;
 
 #include <sys/types.h>
@@ -67,7 +73,7 @@ void process_options(int argc, char * argv[]) {
       break;
     case 'p' :
       opt_pca_file=optarg;
-      sscanf(argv[optind+1],"%d",&opt_pca_num_top);
+      sscanf(argv[optind],"%d",&opt_pca_num_top);
       optind++;
       break;
     }
@@ -121,6 +127,9 @@ int getBim(char * bim, int *chrom_start) {
   line_num=0;
   num_read = fscanf(f,"%d%s%f%d%s%s\n",&chrom, rs, &cm, &pos, maj, min);
   while (num_read == 6) {
+     hash_add(rs,line_num);
+     bim_table[line_num]=(char *) malloc(strlen(rs)+1);
+     strcpy(bim_table[line_num],rs);
       while(next_chrom<chrom) { // missing chroms in bim file
 	  chrom_start[next_chrom]=-1;
 	  next_chrom++;
@@ -136,9 +145,6 @@ int getBim(char * bim, int *chrom_start) {
 	       "<%s>",rs);
 	exit(-14);
      }
-     hash_add(rs,line_num);
-     bim_table[line_num]=(char *) malloc(strlen(rs)+1);
-     strcpy(bim_table[line_num],rs);
      line_num++;
 
   }
@@ -187,29 +193,36 @@ void generateNewPerson(unsigned char * new_bed, int pers) {
    unsigned char *old, *trg, data;
 
    v=0;
+   trg_idx =  pers>>2;           // byte for the new person relative to block
+   trg_pr  =  pers & 0x03;       // where in the byte
+   trg     =  3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
+   old     =  old_bed + (long) v*bsize;
    while (v<num_v) {
      src=arc4random_uniform(num_s); // pick source for current haplo
-     src_idx = src>>2;        // byte of old person
+     src_idx = src>>2;        //  byte of old person
      src_pr  = src & 0x03;    //  where in the byte 
      for(int h=0; h<opt_hap_len ; h++) {
 	 if (v==num_v) return;
-	 old = old_bed + (long) v*bsize;
-	 trg = 3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
-	 trg_idx = pers>>2;            // byte for the new person 
-	 trg_pr  = pers & 0x03;       // where in the byte
-	 data     = old[src_idx] & mask[src_pr];
+	 data    =  old[src_idx] & mask[src_pr];
+         // Clear the old position
+	 trg[trg_idx] &= ~mask[trg_pr];
 	 // put in right place -- probably need to shift it to left or right
 	 // as unlikely to be in same position in the byte
 	 // need to shift by multiples of two
 	 shift = (trg_pr-src_pr)<<1; // *2 
-	 if (shift>0)
+	 if (shift>0) {
 	     trg[trg_idx] |= (data << shift);
-	 else
-	     trg[trg_idx] |= (data >> -shift);
+	 }
+	 else {
+	   trg[trg_idx] |= (data >> (-shift));
+	 }
+	 trg=trg+new_bsize;
+	 old=old+bsize;
 	 v++;
-       }
+     };
    }
 }
+
 
 
 void generateSamples(unsigned char * new_bed) {
@@ -325,7 +338,14 @@ void getPCs(int num_v, float **pc, int * pc_index, int *num_v_pc) {
     }
     for(p=0; p<num_sig_pcs;p++)  {
       m=fscanf(f,"%f",&pc[p][snp]);
-      if (m<0) printf("%d %d %d\n",snp,num_v,m);
+      if (m<0) {
+	printf("Strange error in reading PC file %d %d %d\n",snp,num_v,m);
+        exit(-21);
+      }
+    }
+    if (strlen(snp_name)==0) {
+      printf("Can't find chr %d <%s> %s at %d\n",chrom,all1,all2, snp);
+      exit(-22);
     }
     m = hash_find(bim_table,snp_name);
     pc_index[snp]=m;  // The entry "snp" in the PC table is "m" in the bim_table
@@ -341,8 +361,6 @@ static int pcomp( void *data, const void * id, const void * jd) {
   pc=(float *) data;
   i = *(int *) id;
   j =* (int *) jd;
-  if (((i==133153)||(j==133153))&&((i==138895)||(j==138895)))
-    printf("i=%d (%f), j=%d (%f)\n",i,pc[i],j,pc[j]);
   return pc[i]-pc[j];
 }
 
@@ -384,22 +402,28 @@ int min(int a, int b) {
 #define ancestry_block 2
 
 void copy_byte(int dst, int src, int v) {
-  int start, shift;
+  int start, shift, src_mask, dst_mask;
   unsigned char *dptr, *sptr, src_byte, dst_byte;
 
+  // when copying from src to dest the bits won't be in the same position
+  // in the byte because it is likley dst%4 != src %f
   shift = ((dst&0x03)-(src&0x03))<<1;   
   start = max(0,v-ancestry_block);
-  dptr = new_bed+(long) 3+((long) start)*((long) new_bsize)+(dst/4);
-  sptr= old_bed+((long) start)*((long) bsize)+src/4;
+  dptr = new_bed+(long) 3+((long) start)*((long) new_bsize)+(dst>>2);
+  sptr= old_bed+((long) start)*((long) bsize)+(src>>2);
+  src_mask=mask[src&0x03]; //  to get the relevant bits
+  dst_mask=mask[dst&0x03]; 
   for(int i=start; i<min(v+ancestry_block,num_v); i++) {
-    src_byte=(*sptr)&mask[src&0x03];
-    dst_byte=(*dptr)&(~mask[dst&0x04]);
+    src_byte=(*sptr)&src_mask;
+    dst_byte=(*dptr)&dst_mask;
     if (shift>0)
      *dptr = dst_byte |  (src_byte << shift);
     else
      *dptr = dst_byte | (src_byte >> -shift);
-    sptr++;
-    dptr++;
+    // we now look at the next variant which is in the same position 
+    // within the next block
+    sptr=sptr+bsize;
+    dptr=dptr+new_bsize;
   }
 }
   
@@ -407,7 +431,7 @@ void copy_byte(int dst, int src, int v) {
 void copy_from_source(int dst, int src, int * index, int num_v_pc) {
   for (int i=0; i<opt_pca_num_top/8; i++) {
     copy_byte(dst,src,index[i]);
-    copy_byte(dst,src,index[num_v_pc-i]);    
+    copy_byte(dst,src,index[num_v_pc-i-1]);    
   }
 }
 
@@ -421,6 +445,7 @@ void managePCs(int num_v) {
   // then pc_index tells us for each SNP in the PCA where it is in the 
   pc = (float **) calloc(num_sig_pcs,sizeof(float *));
   getPCs(num_v, pc ,pc_index, &num_v_pc);
+
   // now get the  most significant SNPs in the PC fle
   for(int p=0; p<num_sig_pcs; p++) {
     for(v=0;v<num_v;v++) index[v]=v;
@@ -430,12 +455,24 @@ void managePCs(int num_v) {
     // copy
     for(int dst=0; dst<opt_num_gen; dst++) {
       int src=arc4random_uniform(num_s); // who we will copy
+      printf("Selecting %d \n",src);
       copy_from_source(dst,src,index,num_v_pc); 
     }
   }
 }
 
+void outputBim(char * output, char * bim) {
+  FILE *f, *g;
+  char out_bim[1024],line[32000];
 
+  snprintf(out_bim,1020,"%s.bim%c",output,0);
+  f=fopen(bim,"r");
+  g=fopen(out_bim,"w");
+  while (fscanf(f,"%[^\n]\n",line)>0) 
+    fprintf(g,"%s\n",line);
+  fclose(g);
+  fclose(f);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -467,5 +504,5 @@ int main(int argc, char *argv[]) {
   if (opt_pca_file) managePCs(num_v);
   
   outputData(output_fname, new_bed, is_case);
- 
+  outputBim(output_fname,bim);
 }

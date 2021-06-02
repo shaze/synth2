@@ -2,10 +2,15 @@
 Workflow for creating artificial GWAS data sets based on real data
 
 
+Several separate projects
+
 #gensimul#
 
+This was our first version -- good thing is that it keeps structure very well but the resulting data is relatively identifiable and
+also we land up with smaller data sets than our original
+
 This is C program that takes a source plink file, anonymises
-  and does some randomisation. Here is an example.
+  and does some randomisation. Here is an example. 
 
 ```
    ./gensimul src   200 src.clt mutes  new  
@@ -55,3 +60,15 @@ Then call our auxiliary script to produce in the right format
 ```
 python3 munge_cluster.py data data.clt
 ```
+
+
+
+# hapsimul
+
+This is version 2 -- takes a largish input data set and produces a larger output randomised data set that preserves some LD but collapses
+population structure
+
+
+# simulstruct
+
+This is a Nextflow script that uses hapsimul to get some population structure back in the data

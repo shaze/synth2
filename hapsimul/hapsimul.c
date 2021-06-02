@@ -22,10 +22,12 @@ typedef  unsigned char u_char;
 
 
 
-static char * allowed_options="e:n:H:p:";
+static char * allowed_options="a:e:f:n:H:p:";
 
 static struct option long_options[] = {
+  {"ancestry-block",required_argument,0,'a'},				       
   {"error-rate",required_argument,0,'e'},
+  {"fam-prefix",required_argument,0,'f'},  
   {"num-gen",required_argument,0,'n'},
   {"haplo-len",required_argument,0,'H'},
   {"pca",required_argument,0,'p'},  
@@ -35,11 +37,13 @@ static struct option long_options[] = {
 
 /* Global variables -- set by default and perhaps program options and never modified */
 
-static const int num_sig_pcs=1;
+static const int num_sig_pcs=2;
 
+static char * opt_fam_prefix;
 static double opt_err_rate=0.001;     // New errors introduced
 static int   opt_num_gen=1000;    // Number of individuals generated
 static int   opt_hap_len  = 50;       // Size of haplo window
+static int   opt_ancestry_block = 2;
 static char   *open_gen_pheno = 0;
 static char *opt_pca_file = (char *) 0;
 static int   opt_pca_num_top;
@@ -48,20 +52,23 @@ static char * input_fname, * output_fname;
 static char **bim_table;  // names of SNPs
 
 
-/* PCs -- needs to be global for functional parameter */
 
-float **pc = (float **) 0;
 
 
 void process_options(int argc, char * argv[]) {
   int opt;
   char outfname[255];
-
   while ((opt = getopt_long(argc,argv,allowed_options, long_options,0)) != -1) {
     switch (opt) {
+    case 'a':
+      opt_ancestry_block = atof(optarg);
+      break;
     case 'e':
       opt_err_rate = atof(optarg);
       break;
+    case 'f':
+      free(opt_fam_prefix);
+      opt_fam_prefix=optarg;
     case 'n':
       opt_num_gen=atoi(optarg);
       break;
@@ -155,12 +162,21 @@ int getBim(char * bim, int *chrom_start) {
 unsigned char * readBed(char *bed) {
     FILE *bf;
     unsigned char magic[3], *bdata;
-
+    int num;
+    
     bf = fopen(bed, "r");
-    fread(magic, 1, 3, bf);
+    num=fread(magic, 1, 3, bf);
+    if (num!=3) {
+      printf("Magic number fails. PLINK format problem?\n");
+      exit(-25);
+    }
     assert ( (magic[0]==108) && (magic[1]==27) && (magic[2]==1));
     bdata = calloc(num_v,bsize);
-    fread(bdata, bsize, num_v, bf);
+    num=fread(bdata, bsize, num_v, bf);
+    if (num<=10) {
+      printf("Magic number fails reading date. PLINK format problem?\n");
+      exit(-26);
+    }
     return bdata;
 }
 
@@ -188,22 +204,24 @@ int getFam(char * fam) {
   
 
 void generateNewPerson(unsigned char * new_bed, int pers) {
-  int    src_idx, src_pr, trg_idx, trg_pr, src, v;
+   int    src_idx, src_pr, trg_idx, trg_pr, src, v;
    int   shift;
-   unsigned char *old, *trg, data;
+   unsigned char *orig, *trg, data;
 
    v=0;
    trg_idx =  pers>>2;           // byte for the new person relative to block
    trg_pr  =  pers & 0x03;       // where in the byte
    trg     =  3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
-   old     =  old_bed + (long) v*bsize;
+   orig    =  old_bed + (long) v*bsize;
    while (v<num_v) {
      src=arc4random_uniform(num_s); // pick source for current haplo
-     src_idx = src>>2;        //  byte of old person
-     src_pr  = src & 0x03;    //  where in the byte 
-     for(int h=0; h<opt_hap_len ; h++) {
+     src_idx = src>>2;        //  byte of old person wrt "orig"
+     src_pr  = src & 0x03;    //  where in the byte
+     for(int h=0; h<opt_hap_len  ; h++) {
 	 if (v==num_v) return;
-	 data    =  old[src_idx] & mask[src_pr];
+	 data    =  orig[src_idx] & mask[src_pr];
+	 if (arc4random_uniform(10000) < 10) // add some error
+	   data=data<<1;
          // Clear the old position
 	 trg[trg_idx] &= ~mask[trg_pr];
 	 // put in right place -- probably need to shift it to left or right
@@ -216,8 +234,8 @@ void generateNewPerson(unsigned char * new_bed, int pers) {
 	 else {
 	   trg[trg_idx] |= (data >> (-shift));
 	 }
-	 trg=trg+new_bsize;
-	 old=old+bsize;
+	 trg  = trg+new_bsize;
+	 orig = orig+bsize;
 	 v++;
      };
    }
@@ -246,7 +264,7 @@ void outputData(char * base, unsigned char * new_bed, char * is_case) {
   g = fopen(outfname,"w");
   for(int i=0; i<opt_num_gen; i++) {
      phe = 1+is_case[i];
-     fprintf(g,"D%04d\tD%04d\t0\t0\t0\t%d\n",i,i,phe);
+     fprintf(g,"%s%04d\t%s%04d\t0\t0\t0\t%d\n",opt_fam_prefix,i,opt_fam_prefix,i,phe);
   }
   fclose(g);
 }
@@ -349,7 +367,7 @@ void getPCs(int num_v, float **pc, int * pc_index, int *num_v_pc) {
     }
     m = hash_find(bim_table,snp_name);
     pc_index[snp]=m;  // The entry "snp" in the PC table is "m" in the bim_table
-    fscanf(f,"%[^\n]",all1);
+    m=fscanf(f,"%[^\n]",all1);
   }
   *num_v_pc=snp;
   fclose(f);
@@ -399,23 +417,23 @@ int min(int a, int b) {
   return a < b  ? a :b;
 }
 
-#define ancestry_block 2
+
 
 void copy_byte(int dst, int src, int v) {
   int start, shift, src_mask, dst_mask;
   unsigned char *dptr, *sptr, src_byte, dst_byte;
 
   // when copying from src to dest the bits won't be in the same position
-  // in the byte because it is likley dst%4 != src %f
+  // in the byte because it is likely dst%4 != src%4
   shift = ((dst&0x03)-(src&0x03))<<1;   
-  start = max(0,v-ancestry_block);
+  start = max(0,v-opt_ancestry_block);
   dptr = new_bed+(long) 3+((long) start)*((long) new_bsize)+(dst>>2);
-  sptr= old_bed+((long) start)*((long) bsize)+(src>>2);
+  sptr = old_bed+((long) start)*((long) bsize)+(src>>2);
   src_mask=mask[src&0x03]; //  to get the relevant bits
-  dst_mask=mask[dst&0x03]; 
-  for(int i=start; i<min(v+ancestry_block,num_v); i++) {
+  dst_mask=mask[dst&0x03];
+  for(int i=start; i<min(v+opt_ancestry_block,num_v); i++) {
+    dst_byte=(*dptr)&(~dst_mask); // zero out the two bits in dest to be repaced
     src_byte=(*sptr)&src_mask;
-    dst_byte=(*dptr)&dst_mask;
     if (shift>0)
      *dptr = dst_byte |  (src_byte << shift);
     else
@@ -437,9 +455,13 @@ void copy_from_source(int dst, int src, int * index, int num_v_pc) {
 
 void managePCs(int num_v) {
   float **pc;
-  int index[num_v], pc_index[num_v], v;  // NB: pc_index bigger than it needs to be
+  int *index, *pc_index, v;  
   int num_v_pc; // Number variants in the PC file
 
+  // we do an alloc of this rather than declare the arrays as they are then in the heap
+  // as there are some systems on which there are stack limits
+  index = (int*) calloc(num_v,sizeof(int));
+  pc_index  = (int*) calloc(num_v,sizeof(int)); // NB: pc_index bigger than it needs to be
   // We have two indexes here -- "index" is an index into the SNPs that
   // are in the PC. We sort them in order to find the ones with most weight
   // then pc_index tells us for each SNP in the PCA where it is in the 
@@ -447,7 +469,7 @@ void managePCs(int num_v) {
   getPCs(num_v, pc ,pc_index, &num_v_pc);
 
   // now get the  most significant SNPs in the PC fle
-  for(int p=0; p<num_sig_pcs; p++) {
+  for(int p=num_sig_pcs-1; p>=0; p--) {
     for(v=0;v<num_v;v++) index[v]=v;
     quick_sort(index,pc[p],0,num_v_pc);
     // find where in the BIM file these SNPs are
@@ -455,10 +477,14 @@ void managePCs(int num_v) {
     // copy
     for(int dst=0; dst<opt_num_gen; dst++) {
       int src=arc4random_uniform(num_s); // who we will copy
-      printf("Selecting %d \n",src);
-      copy_from_source(dst,src,index,num_v_pc); 
+      copy_from_source(dst,src,index,num_v_pc);
     }
   }
+  for (int p=0; p<num_sig_pcs; p++)
+    free(pc[p]);
+  free(pc);
+  free(index);
+  free(pc_index);
 }
 
 void outputBim(char * output, char * bim) {
@@ -480,7 +506,7 @@ int main(int argc, char *argv[]) {
   char *is_case;
 
   char  bed[4096], bim[4096], fam[4096];
-
+  opt_fam_prefix=malloc(256);
   process_options(argc, argv);
   hash_init();
   // max fname is 4096 including suffix!
@@ -502,7 +528,8 @@ int main(int argc, char *argv[]) {
     //mutateData(argv[4],new_bed, num_new);
 
   if (opt_pca_file) managePCs(num_v);
-  
+
   outputData(output_fname, new_bed, is_case);
+  free(is_case);
   outputBim(output_fname,bim);
 }

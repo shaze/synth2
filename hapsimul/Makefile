@@ -7,6 +7,9 @@ hapsimul:	hash.o hapsimul.c
 hash.o: hash.c
 	$(CC)  -lbsd -O2 -c -g -std=c99 hash.c
 
+ubuntu:
+	$(CC) -fno-omit-frame-pointer -fsanitize=address  -O2 -g -o hapsimul -std=c99 hapsimul.c  hash.c -lbsd 
+
 
 clean:
 	/bin/rm -f *.o hapsimul

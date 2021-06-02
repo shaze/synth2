@@ -118,7 +118,9 @@ process combinedPlink {
         file (all_plinks) from simulated_data_ch.flatten().toList()
      output:
        set file("${out}.bed"), file("${out}.bim"), file("${out}.fam") into  \
-           pca_out_ch, fam_munge_ch
+           pca_out_ch
+       set file("${out}.bed"), file("${out}.bim"), file("tmp.fam") into  \
+           fam_munge_ch	   
      publishDir params.out_dir, pattern: "${out}.{bed,bim}"
      script:
        out=outname
@@ -137,17 +139,19 @@ process mungeFam {
   input:
     set file(bed), file(bim), file(fam) from fam_munge_ch
   output:
-     file("res/${outname}.fam")
-  publishDir params.out_dir, pattern: "res/${out}.fam}"
+     file("${out}.fam") into res_ch
+  publishDir params.out_dir
   script:
    base = bed.simpleName
    out=outname
    """
      mkdir res
-     plink --bfile $base --make-bed --impute-sex --out res/tmp
-     rename_fam.py --sex-error 0.001 res/tmp.fam res/${outname}.fam 
+     plink --bed $bed --bim $bim --fam $fam --make-bed --impute-sex --out res/tmp
+     rename_fam.py --sex-error 0.001 res/tmp.fam ${outname}.fam 
    """
 }
+
+
 
 process pruneOut {
    input:

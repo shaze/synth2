@@ -31,8 +31,6 @@ void hash_add(char * snp, int p) {
     ind=(ind+i)&mask;
     i=i+2;
   }
-  if (strcmp("snp-known61733550",snp)==0)
-    printf("Hash index %d\n",ind);
   table[ind]=p;
 }
 

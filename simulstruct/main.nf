@@ -108,7 +108,7 @@ process simulateCluster{
       out="${input}_sim"
       """
       N=`getsize.py $fam $expansion`
-      hapsimul --fam-prefix $input --num-gen \$N --pca awi-original.eigenvec.var 1600 -H 128 $input $out
+      hapsimul --fam-prefix $input --num-gen \$N --pca $evec 1600 -H 128 $input $out
       """
 }
 

@@ -50,7 +50,7 @@ static int   opt_pca_num_top;
 static char * input_fname, * output_fname;
 
 static char **bim_table;  // names of SNPs
-
+static uint64_t new_bed_size;
 
 
 
@@ -182,8 +182,9 @@ unsigned char * readBed(char *bed) {
 
 unsigned char * allocBed(int num_new) {
     unsigned char  *bdata;
-    bdata = malloc(3+num_v*new_bsize);
-    bzero(bdata,3+num_v*new_bsize);
+    new_bed_size =  3+ ((uint64_t) (num_v)* ((uint64_t) (new_bsize)));
+    bdata = malloc(new_bed_size);
+    bzero(bdata,new_bed_size);
     bdata[0]=108;
     bdata[1]=27;
     bdata[2]=1;
@@ -211,8 +212,8 @@ void generateNewPerson(unsigned char * new_bed, int pers) {
    v=0;
    trg_idx =  pers>>2;           // byte for the new person relative to block
    trg_pr  =  pers & 0x03;       // where in the byte
-   trg     =  3+ new_bed+ (long) v*new_bsize; // (3 is for magic numbers)
-   orig    =  old_bed + (long) v*bsize;
+   trg     =  3+ new_bed+ (uint64_t) v*new_bsize; // (3 is for magic numbers)
+   orig    =  old_bed + (uint64_t) v*bsize;
    while (v<num_v) {
      src=arc4random_uniform(num_s); // pick source for current haplo
      src_idx = src>>2;        //  byte of old person wrt "orig"
@@ -223,6 +224,7 @@ void generateNewPerson(unsigned char * new_bed, int pers) {
 	 if (arc4random_uniform(10000) < 10) // add some error
 	   data=data<<1;
          // Clear the old position
+	 //printf("h=%d,trg_idx=%d,trg_pr=%d trg=%ld\n",h,trg_idx,trg_pr,(long int)trg);
 	 trg[trg_idx] &= ~mask[trg_pr];
 	 // put in right place -- probably need to shift it to left or right
 	 // as unlikely to be in same position in the byte
@@ -257,7 +259,7 @@ void outputData(char * base, unsigned char * new_bed, char * is_case) {
   strcpy(outfname,base);
   strcat(outfname,".bed");
   g = fopen(outfname,"w");
-  fwrite(new_bed,1,3+new_bsize*num_v,g);
+  fwrite(new_bed,1,new_bed_size,g);
   fclose(g);
   strcpy(outfname,base);
   strcat(outfname,".fam");

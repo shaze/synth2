@@ -4,7 +4,7 @@ Workflow for creating artificial GWAS data sets based on real data
 
 Several separate projects
 
-#gensimul#
+# gensimul #
 
 This was our first version -- good thing is that it keeps structure very well but the resulting data is relatively identifiable and
 also we land up with smaller data sets than our original

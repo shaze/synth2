@@ -1,0 +1,10 @@
+Wits Usage Policy for Data Generated using hapsimul and other related code
+
+Recipients must provide evidence of ethics training in the last three years, but no ethics approval is required. Recipients should be staff members of their organisation and 
+must agree to the following
+a data can only be used for training and computational benchmarking purposes
+b no attempt must be made to reidentify individuals
+c where used for training, the recipient may provide the data to trainees but must ensure that trainees accept these conditions
+d supervisors may provide the data to staff and students who report to them their same organisation
+e except for the provisions of (c) and (d) no further redistribution of data is allowed
+
